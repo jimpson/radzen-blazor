@@ -1,0 +1,34 @@
+﻿@using System.Linq.Expressions
+@typeparam TItem
+@inherits RadzenComponent
+
+@if (Columns != null)
+{
+    <CascadingValue Value=this>
+        @Columns
+    </CascadingValue>
+}
+
+@if (Visible)
+{
+    <RadzenSelectBar @bind-Value=LogicalFilterOperator Change="@((LogicalFilterOperator args) => { InvokeAsync(ChangeState); if(Auto) { InvokeAsync(Filter); } })">
+        <Items>
+            <RadzenSelectBarItem Text="And" Value="LogicalFilterOperator.And" />
+            <RadzenSelectBarItem Text="Or" Value="LogicalFilterOperator.Or" />
+        </Items>
+    </RadzenSelectBar>
+
+    <RadzenButton title="@AddFilterText" Icon="add" Click="@(args => { Filters = Filters.Concat(new CompositeFilterDescriptor[] { new CompositeFilterDescriptor() }); StateHasChanged(); })"/>
+    <RadzenButton title="@AddFilterGroupText" Icon="playlist_add" Click="@(args => { Filters = Filters.Concat( new CompositeFilterDescriptor[] { new CompositeFilterDescriptor() { Filters = Enumerable.Empty<CompositeFilterDescriptor>() } }); StateHasChanged(); })" />
+    <RadzenButton title="@ClearFilterText" Icon="clear" Disabled=@(!Filters.Any())
+        Click="@(args => { Filters = Enumerable.Empty<CompositeFilterDescriptor>(); StateHasChanged(); })" />
+
+    <ul @ref="@Element" style="@Style" @attributes="Attributes" class="@GetCssClass()" id="@GetId()">
+        @foreach(var filter in Filters)
+        {
+          <li style="list-style: none; padding: 2px;">
+            <RadzenDataFilterItem DataFilter="@this" Filter="@filter" />
+          </li>
+        }
+    </ul>
+}

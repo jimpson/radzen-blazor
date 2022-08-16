@@ -1,0 +1,226 @@
+@typeparam TItem
+@if (Filter.Filters != null)
+{
+    <RadzenSelectBar @bind-Value=Filter.LogicalFilterOperator Change="@((LogicalFilterOperator args) => { InvokeAsync(ChangeState); InvokeAsync(ApplyFilter); })">
+        <Items>
+            <RadzenSelectBarItem Text="And" Value="LogicalFilterOperator.And" />
+            <RadzenSelectBarItem Text="Or" Value="LogicalFilterOperator.Or" />
+        </Items>
+    </RadzenSelectBar>
+
+    <RadzenButton title="@DataFilter.AddFilterText" Icon="add" Click="@AddFilter" />
+    <RadzenButton title="@DataFilter.AddFilterGroupText" Icon="playlist_add" Click="@AddGroupFilter" />
+    <RadzenButton title="@DataFilter.ClearFilterText" Icon="clear" Click="@ClearFilters" Disabled=@(!Filter.Filters.Any()) />
+    <RadzenButton title="@DataFilter.RemoveFilterText" Icon="delete" Click="@RemoveFilter" />
+
+    <ul>
+    @foreach(var filter in Filter.Filters)
+    {
+        <li style="list-style: none; padding: 2px;">
+            <RadzenDataFilterItem DataFilter="@this.DataFilter" Filter="@filter" Parent=@this />
+        </li>
+    }
+    </ul>
+}
+else
+{
+    <RadzenDropDown @bind-Value="@Filter.Property" Data="@(DataFilter?.columns)" ValueProperty="Property" TValue="string" Change="@OnPropertyChange">
+        <Template>
+                @{
+                    var column = (RadzenDataFilterColumn<TItem>)context;
+                }
+                @(column.Title ?? column.Property)
+        </Template>
+    </RadzenDropDown>
+    if (column != null)
+    {
+        <RadzenDropDown @onclick:preventDefault="true" Data="@(column.GetFilterOperators().Select(t => new { Value = column.GetFilterOperatorText(t), Key = t }))" 
+                TextProperty="Value" ValueProperty="Key" TValue="FilterOperator" @bind-Value="@Filter.FilterOperator" />
+
+        @if (PropertyAccess.IsNullableEnum(column.FilterPropertyType) || PropertyAccess.IsEnum(column.FilterPropertyType))
+        {
+            <RadzenDropDown AllowClear="false" AllowFiltering="false" TValue="@object" Style="vertical-align: top;width: 200px;"
+                @bind-Value=@Filter.FilterValue Multiple="false" Placeholder="@DataFilter.EnumFilterSelectText" TextProperty="Text" ValueProperty="Value"
+                Data=@EnumExtensions.EnumAsKeyValuePair(Nullable.GetUnderlyingType(column.FilterPropertyType) ?? column.FilterPropertyType) Change=@(args  => InvokeAsync(ApplyFilter))/>
+        }
+        else if (PropertyAccess.IsNumeric(column.FilterPropertyType))
+        {
+            @(DrawNumericFilter())
+        }
+        else if (PropertyAccess.IsDate(column.FilterPropertyType))
+        {
+            <RadzenDatePicker @bind-Value=@Filter.FilterValue TValue ="@object" ShowTime="true" Style="vertical-align: top;width: 200px;"
+                ShowTimeOkButton="true" DateFormat="@getFilterDateFormat()" Change=@(args => InvokeAsync(ApplyFilter)) />
+        }
+        else if (column.FilterPropertyType == typeof(bool) || column.FilterPropertyType == typeof(bool?))
+        {
+            <RadzenCheckBox TriState="true" TValue="@object" @bind-Value=@Filter.FilterValue Change=@(args => InvokeAsync(ApplyFilter)) Style="vertical-align: top;margin-top:7px;" />
+        }
+        else
+        {
+            <RadzenTextBox Style="vertical-align: top;width: 200px;" Value="@($"{Filter.FilterValue}")" Change=@(args => { Filter.FilterValue = args; InvokeAsync(ApplyFilter); }) />
+        }
+
+        <RadzenButton title="@DataFilter.RemoveFilterText" Style="vertical-align: top;" Icon="delete" Click="@RemoveFilter" />
+    }
+}
+@code {
+    [Parameter]
+    public RadzenDataFilter<TItem> DataFilter { get; set; }
+
+    [Parameter]
+    public RadzenDataFilterItem<TItem> Parent { get; set; }
+
+    CompositeFilterDescriptor _filter;
+    [Parameter]
+    public CompositeFilterDescriptor Filter
+    {
+        get
+        {
+            return _filter;
+        }
+        set
+        {
+            _filter = value;
+
+            if (column == null && Filter.Filters == null)
+            {
+                column = (Filter.Property != null ? DataFilter.columns
+                    .Where(c => object.Equals(c.Property, Filter.Property)) : DataFilter.columns).FirstOrDefault();
+            }
+
+            if(column != null)
+            {
+                Filter.Property = column.Property;
+            }
+        }
+    }
+
+    RadzenDataFilterColumn<TItem> column;
+
+    async Task ApplyFilter()
+    { 
+        if (DataFilter.Auto)
+        {
+            await DataFilter.Filter();
+        }
+    }
+
+    async Task OnPropertyChange(object property)
+    {
+        column = DataFilter.columns.Where(c => object.Equals(c.Property, property)).FirstOrDefault();
+
+        await ApplyFilter();
+    }
+
+    async Task AddFilter()
+    { 
+        Filter.Filters = Filter.Filters.Concat(new CompositeFilterDescriptor[] { new CompositeFilterDescriptor() });
+
+        await ApplyFilter();
+    }
+
+    async Task AddGroupFilter()
+    {
+        Filter.Filters = Filter.Filters.Concat(new CompositeFilterDescriptor[]
+            { 
+                new CompositeFilterDescriptor() 
+                {
+                    Filters = Enumerable.Empty<CompositeFilterDescriptor>()
+                }
+            }
+        );
+
+        await ApplyFilter();
+    }
+
+    async Task ClearFilters()
+    { 
+        Filter.Filters = Enumerable.Empty<CompositeFilterDescriptor>();
+
+        await ApplyFilter();
+    }
+
+    async Task RemoveFilter()
+    {
+        column = null;
+
+        if (Parent != null)
+        {
+            Parent.Filter.Filters = Parent.Filter.Filters.Where(f => f != Filter).ToList();
+            await Parent.ChangeState();
+        }
+        else
+        {
+            DataFilter.Filters = DataFilter.Filters.Where(f => f != Filter).ToList();
+            await DataFilter.ChangeState();
+        }
+
+        await ApplyFilter();
+    }
+
+    internal async Task ChangeState()
+    {
+        await InvokeAsync(StateHasChanged);
+    }
+
+    RenderFragment DrawNumericFilter()
+    {
+        return new RenderFragment(builder =>
+        {
+            var type = Nullable.GetUnderlyingType(column.FilterPropertyType) != null ?
+                column.FilterPropertyType : typeof(Nullable<>).MakeGenericType(column.FilterPropertyType);
+
+            var numericType = typeof(RadzenNumeric<>).MakeGenericType(type);
+
+            builder.OpenComponent(0, numericType);
+
+            builder.AddAttribute(1, "Value", Filter.FilterValue);
+            builder.AddAttribute(2, "Style", "vertical-align: top;width: 200px;");
+
+            Action<object> action = args =>
+            {
+                Filter.FilterValue = args; InvokeAsync(ApplyFilter);
+            };
+
+            var eventCallbackGenericCreate = typeof(NumericFilterEventCallback).GetMethod("Create").MakeGenericMethod(type);
+            var eventCallbackGenericAction = typeof(NumericFilterEventCallback).GetMethod("Action").MakeGenericMethod(type);
+
+            builder.AddAttribute(3, "Change", eventCallbackGenericCreate.Invoke(this,
+                new object[] { this, eventCallbackGenericAction.Invoke(this, new object[] { action }) }));
+
+            builder.CloseComponent();
+        });
+    }
+
+    internal class NumericFilterEventCallback
+    {
+        public static EventCallback<T> Create<T>(object receiver, Action<T> action)
+        {
+            return EventCallback.Factory.Create<T>(receiver, action);
+        }
+
+        public static Action<T> Action<T>(Action<object> action)
+        {
+            return args => action(args);
+        }
+    }
+
+    internal string getFilterDateFormat()
+    {
+        if (column != null && !string.IsNullOrEmpty(column.FormatString))
+        {
+            var formats = column.FormatString.Split(new char[] { '{', '}' }, StringSplitOptions.RemoveEmptyEntries);
+            if (formats.Length > 0)
+            {
+                var format = formats[0].Trim().Split(':');
+                if (format.Length > 1)
+                {
+                    return format[1].Trim();
+                }
+            }
+        }
+
+        return DataFilter.FilterDateFormat;
+    }
+}
